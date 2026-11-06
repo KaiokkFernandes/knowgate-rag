@@ -1,9 +1,12 @@
 import { Controller, Get } from '@nestjs/common';
 import { HealthCheck, HealthCheckService } from '@nestjs/terminus';
 import type { HealthResponse } from '@knowgate/shared';
+import { Public } from '../auth/decorators';
 import { PostgresHealthIndicator } from './postgres.health';
 import { RedisHealthIndicator } from './redis.health';
 
+// Public: load balancers and orchestrators call it without credentials.
+@Public()
 @Controller('health')
 export class HealthController {
   constructor(
