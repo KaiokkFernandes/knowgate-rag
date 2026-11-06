@@ -8,5 +8,5 @@
     "strictPropertyInitialization": false,
     "types": ["node", "jest"]
   },
-  "include": ["src", "test", "jest.config.mjs"]
+  "include": ["src", "test", "jest.config.mjs", "jest.integration.config.mjs"]
 }
