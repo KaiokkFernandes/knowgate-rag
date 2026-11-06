@@ -12,6 +12,13 @@ export const envSchema = z.object({
   WEB_URL: z.url().default('http://localhost:3000'),
   DATABASE_URL: z.url({ protocol: /^postgres(ql)?$/ }),
   REDIS_URL: z.url({ protocol: /^rediss?$/ }),
+  // HS256 key: at least 256 bits. Generate with `openssl rand -hex 32`.
+  JWT_SECRET: z.string().min(32, { error: 'JWT_SECRET must have at least 32 characters' }),
+  JWT_ACCESS_TTL_SECONDS: z.coerce.number().int().positive().default(900),
+  REFRESH_TOKEN_TTL_DAYS: z.coerce.number().int().positive().default(7),
+  // Requests per minute per IP: every route / login and register (brute-force protection).
+  RATE_LIMIT_PER_MINUTE: z.coerce.number().int().positive().default(100),
+  AUTH_RATE_LIMIT_PER_MINUTE: z.coerce.number().int().positive().default(5),
 });
 
 export type Env = z.infer<typeof envSchema>;
