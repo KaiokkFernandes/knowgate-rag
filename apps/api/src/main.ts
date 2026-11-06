@@ -1,6 +1,7 @@
 import { Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { NestFactory } from '@nestjs/core';
+import cookieParser from 'cookie-parser';
 import { AppModule } from './app.module';
 import type { Env } from './config/env';
 
@@ -10,7 +11,9 @@ async function bootstrap(): Promise<void> {
 
   // Closes the pg pool and the Redis client on SIGTERM (docker stop, k8s).
   app.enableShutdownHooks();
-  app.enableCors({ origin: config.get('WEB_URL', { infer: true }) });
+  app.use(cookieParser());
+  // credentials: the web app must send the refresh cookie to /auth/refresh.
+  app.enableCors({ origin: config.get('WEB_URL', { infer: true }), credentials: true });
 
   const port = config.get('API_PORT', { infer: true });
   await app.listen(port);

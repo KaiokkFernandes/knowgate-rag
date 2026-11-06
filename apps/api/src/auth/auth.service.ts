@@ -3,6 +3,7 @@ import { Prisma, type PrismaClient } from '@knowgate/db';
 import type { AuthResponse, LoginRequest, RegisterRequest } from '@knowgate/shared';
 import { PRISMA } from '../database/database.module';
 import { PasswordService } from './password.service';
+import { type IssuedRefreshToken, SessionService } from './session.service';
 import { TokenService } from './token.service';
 
 @Injectable()
@@ -11,16 +12,17 @@ export class AuthService {
     @Inject(PRISMA) private readonly prisma: PrismaClient,
     private readonly passwords: PasswordService,
     private readonly tokens: TokenService,
+    private readonly sessions: SessionService,
   ) {}
 
-  async register(input: RegisterRequest): Promise<{ userId: string; tokens: AuthResponse }> {
+  async register(input: RegisterRequest): Promise<IssuedSession> {
     const passwordHash = await this.passwords.hash(input.password);
     try {
       const user = await this.prisma.user.create({
         data: { email: input.email, name: input.name, passwordHash },
         select: { id: true },
       });
-      return { userId: user.id, tokens: await this.tokens.issueAccessToken(user.id) };
+      return await this.issueSession(user.id);
     } catch (error) {
       // Unique violation on email. Relying on the constraint (not a SELECT first) is race-free.
       if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
@@ -30,7 +32,7 @@ export class AuthService {
     }
   }
 
-  async login(input: LoginRequest): Promise<{ userId: string; tokens: AuthResponse }> {
+  async login(input: LoginRequest): Promise<IssuedSession> {
     const user = await this.prisma.user.findUnique({
       where: { email: input.email },
       select: { id: true, passwordHash: true },
@@ -49,6 +51,28 @@ export class AuthService {
       });
     }
 
-    return { userId: user.id, tokens: await this.tokens.issueAccessToken(user.id) };
+    return this.issueSession(user.id);
   }
+
+  async refresh(refreshToken: string): Promise<IssuedSession> {
+    const { userId, refresh } = await this.sessions.rotate(refreshToken);
+    return { tokens: await this.tokens.issueAccessToken(userId), refresh };
+  }
+
+  logout(refreshToken: string): Promise<void> {
+    return this.sessions.revoke(refreshToken);
+  }
+
+  private async issueSession(userId: string): Promise<IssuedSession> {
+    const [tokens, refresh] = await Promise.all([
+      this.tokens.issueAccessToken(userId),
+      this.sessions.create(userId),
+    ]);
+    return { tokens, refresh };
+  }
+}
+
+export interface IssuedSession {
+  tokens: AuthResponse;
+  refresh: IssuedRefreshToken;
 }

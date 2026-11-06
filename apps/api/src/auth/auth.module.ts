@@ -7,6 +7,7 @@ import { AuthController } from './auth.controller';
 import { AuthService } from './auth.service';
 import { JwtAuthGuard } from './jwt-auth.guard';
 import { PasswordService } from './password.service';
+import { SessionService } from './session.service';
 import { TokenService } from './token.service';
 
 @Module({
@@ -22,6 +23,7 @@ import { TokenService } from './token.service';
   providers: [
     AuthService,
     PasswordService,
+    SessionService,
     TokenService,
     { provide: APP_GUARD, useClass: JwtAuthGuard },
   ],
