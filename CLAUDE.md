@@ -178,3 +178,21 @@ Comece pela **fase 1**. Antes de escrever código, me mostre:
 3. A lista de dependências com o motivo de cada uma.
 
 Espere minha aprovação e só então implemente.
+
+## 15. Decisões de banco
+
+Valem para todas as fases. Mudar alguma delas exige discutir antes.
+
+- **PostgreSQL + pgvector** em vez de MongoDB Atlas ou de um banco vetorial dedicado (Pinecone, Qdrant etc.): o domínio é relacional (organizações, times, papéis, visibilidade); o RLS serve de segunda camada de isolamento; documento e chunks são gravados numa única transação; e não há dependência de um serviço gerenciado a mais.
+- **Busca vetorial com filtro:** o HNSW filtra *depois* de buscar os vizinhos, então um filtro seletivo (como o tenant) pode devolver menos de k resultados. Usar pgvector >= 0.8 com `SET LOCAL hnsw.iterative_scan = relaxed_order` (e `hnsw.max_scan_tuples` se precisar) na fase 2. O teste de isolamento deve ter uma organização com **muito mais** chunks que a outra, para provar que a organização pequena ainda recebe os seus resultados.
+- **Full-text:** usar uma configuração de texto própria para português com `unaccent` como dicionário (`portuguese_unaccent`), e não a função `unaccent()`, que é só STABLE e não pode ser usada numa coluna gerada.
+- **Visibilidade por time:** começar com join em `Document`/`DocumentTeam` na consulta de busca. Desnormalizar a visibilidade e os times no `Chunk` (por exemplo, um array de `teamIds` com índice GIN) é uma alternativa documentada, caso o join pese.
+- **SQL vetorial e de full-text** fica concentrado num `ChunkRepository`, com `$queryRaw` (tagged template, nunca `$queryRawUnsafe` com entrada do usuário).
+- **Uso e custo:** o PostgreSQL (`UsageEvent`) é a fonte da verdade. O Redis é só o contador rápido do limite diário e pode ser reconstruído a partir do banco.
+
+### RLS (implementar depois, não agora)
+
+1. Na migration: `ALTER TABLE ... ENABLE ROW LEVEL SECURITY` e `FORCE ROW LEVEL SECURITY` nas tabelas com `organizationId`, com a política `USING ("organizationId" = current_setting('app.current_org_id', true)::uuid)`.
+2. A aplicação conecta com um papel sem `BYPASSRLS` e que não é dono das tabelas; as migrations rodam com o papel dono.
+3. Em cada requisição, as consultas rodam dentro de `prisma.$transaction`, começando por `SELECT set_config('app.current_org_id', ${orgId}, true)`. O `true` (escopo local) limita o valor à transação, para que ele não vaze para outra requisição que reutilize a mesma conexão do pool.
+4. Encapsular isso numa Client Extension do Prisma (`$extends`), para que nenhuma consulta escape do contexto do tenant.
