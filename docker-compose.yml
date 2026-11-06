@@ -1,0 +1,47 @@
+# Local infrastructure for KnowGate.
+# Phase 1a: only Postgres (+pgvector) and Redis. The API and the web app run on
+# the host with `pnpm dev`; they join this file (under a profile) in phase 1b.
+name: knowgate
+
+services:
+  postgres:
+    # Official pgvector image: pins both the extension (0.8.7) and Postgres major (18).
+    image: pgvector/pgvector:0.8.7-pg18-trixie
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-knowgate}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-knowgate}
+      POSTGRES_DB: ${POSTGRES_DB:-knowgate}
+    ports:
+      # Bound to localhost only: the database is not exposed to the network.
+      - '127.0.0.1:${POSTGRES_PORT:-5432}:5432'
+    volumes:
+      # Postgres 18 images keep data under /var/lib/postgresql/<major>/docker,
+      # so the volume is mounted on the parent directory (not .../data).
+      - postgres-data:/var/lib/postgresql
+    healthcheck:
+      # $$ escapes Compose interpolation: the variables are resolved inside the container.
+      test: ['CMD-SHELL', 'pg_isready -U "$${POSTGRES_USER}" -d "$${POSTGRES_DB}"']
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 10s
+
+  redis:
+    image: redis:8.10.3-alpine
+    restart: unless-stopped
+    # Append-only file: usage counters survive a container restart.
+    command: ['redis-server', '--appendonly', 'yes']
+    ports:
+      - '127.0.0.1:${REDIS_PORT:-6379}:6379'
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  postgres-data:
+  redis-data:
