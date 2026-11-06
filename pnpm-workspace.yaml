@@ -34,3 +34,4 @@ minimumReleaseAgeExclude:
   - '@tailwindcss/postcss@4.3.5'
   - minimatch@11.0.5
   - tailwindcss@4.3.5
+  - '@nestjs/jwt@12.0.4'
