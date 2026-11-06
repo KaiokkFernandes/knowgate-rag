@@ -1,12 +1,14 @@
 import { Controller, Get } from '@nestjs/common';
 import { HealthCheck, HealthCheckService } from '@nestjs/terminus';
+import { SkipThrottle } from '@nestjs/throttler';
 import type { HealthResponse } from '@knowgate/shared';
 import { Public } from '../auth/decorators';
 import { PostgresHealthIndicator } from './postgres.health';
 import { RedisHealthIndicator } from './redis.health';
 
-// Public: load balancers and orchestrators call it without credentials.
+// Public and not rate limited: load balancers and orchestrators poll it without credentials.
 @Public()
+@SkipThrottle()
 @Controller('health')
 export class HealthController {
   constructor(

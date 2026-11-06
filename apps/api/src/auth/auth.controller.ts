@@ -17,6 +17,7 @@ import {
 } from '@knowgate/shared';
 import type { Request, Response } from 'express';
 import { ZodValidationPipe } from '../common/zod-validation.pipe';
+import { AuthRateLimit } from '../security/rate-limit';
 import { AuthService, type IssuedSession } from './auth.service';
 import { Public } from './decorators';
 import { clearRefreshCookie, REFRESH_COOKIE, setRefreshCookie } from './refresh-cookie';
@@ -31,6 +32,7 @@ export class AuthController {
   constructor(private readonly auth: AuthService) {}
 
   @Post('register')
+  @AuthRateLimit()
   async register(
     @Body(new ZodValidationPipe(registerRequestSchema)) body: RegisterRequest,
     @Res({ passthrough: true }) res: Response,
@@ -39,6 +41,7 @@ export class AuthController {
   }
 
   @Post('login')
+  @AuthRateLimit()
   @HttpCode(HttpStatus.OK)
   async login(
     @Body(new ZodValidationPipe(loginRequestSchema)) body: LoginRequest,
