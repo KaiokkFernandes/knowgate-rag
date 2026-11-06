@@ -3,6 +3,8 @@ packages:
   - packages/*
 allowBuilds:
   '@parcel/watcher': false
+  '@prisma/engines': true
+  prisma: true
 minimumReleaseAgeExclude:
   - '@isaacs/nonrecursive-glob-match@1.1.0'
   - '@nestjs/cli@12.0.12'
