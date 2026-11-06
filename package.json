@@ -10,7 +10,7 @@
   "scripts": {
     "dev": "pnpm --filter @knowgate/shared build && pnpm -r --parallel dev",
     "build": "pnpm -r build",
-    "lint": "pnpm -r lint",
+    "lint": "node scripts/check-env-example.mjs && pnpm -r lint",
     "typecheck": "pnpm --filter @knowgate/shared build && pnpm -r typecheck",
     "test": "pnpm --filter @knowgate/shared build && pnpm -r test",
     "test:integration": "pnpm -r --if-present test:integration",
@@ -19,7 +19,8 @@
     "db:migrate": "pnpm --filter @knowgate/db migrate",
     "db:generate": "pnpm --filter @knowgate/db generate",
     "db:reset": "pnpm --filter @knowgate/db reset",
-    "db:studio": "pnpm --filter @knowgate/db studio"
+    "db:studio": "pnpm --filter @knowgate/db studio",
+    "lint:env": "node scripts/check-env-example.mjs"
   },
   "devDependencies": {
     "@eslint/js": "9.39.5",
