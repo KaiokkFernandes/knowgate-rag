@@ -12,6 +12,7 @@ export const ignores = {
     '**/coverage/**',
     '**/node_modules/**',
     '**/next-env.d.ts',
+    '**/src/generated/**',
   ],
 };
 

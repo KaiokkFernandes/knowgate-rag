@@ -4,3 +4,4 @@ dist
 coverage
 pnpm-lock.yaml
 CLAUDE.md
+**/src/generated
