@@ -70,6 +70,26 @@ model User {
   createdDocuments Document[]
   conversations    Conversation[]
   usageEvents      UsageEvent[]
+  sessions         Session[]
+}
+
+/// Refresh token session. Only the SHA-256 of the token is stored: a database leak does
+/// not reveal usable tokens. Each refresh rotates the token (replacedById chains the
+/// rotation); presenting a revoked token is treated as theft and revokes every session.
+model Session {
+  id           String    @id @default(dbgenerated("uuidv7()")) @db.Uuid
+  userId       String    @db.Uuid
+  tokenHash    String    @unique
+  expiresAt    DateTime  @db.Timestamptz(3)
+  revokedAt    DateTime? @db.Timestamptz(3)
+  replacedById String?   @unique @db.Uuid
+  createdAt    DateTime  @default(now()) @db.Timestamptz(3)
+
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  replacedBy Session? @relation("SessionRotation", fields: [replacedById], references: [id], onDelete: SetNull)
+  replaces   Session? @relation("SessionRotation")
+
+  @@index([userId])
 }
 
 model Membership {
