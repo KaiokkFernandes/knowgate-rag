@@ -4,7 +4,10 @@ packages:
 allowBuilds:
   '@parcel/watcher': false
   '@prisma/engines': true
+  cpu-features: false
   prisma: true
+  protobufjs: false
+  ssh2: false
 minimumReleaseAgeExclude:
   - '@isaacs/nonrecursive-glob-match@1.1.0'
   - '@nestjs/cli@12.0.12'

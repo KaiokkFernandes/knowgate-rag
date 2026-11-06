@@ -20,7 +20,8 @@
     "migrate": "prisma migrate dev",
     "migrate:deploy": "prisma migrate deploy",
     "reset": "prisma migrate reset",
-    "studio": "prisma studio"
+    "studio": "prisma studio",
+    "test:integration": "node --experimental-vm-modules ./node_modules/jest/bin/jest.js"
   },
   "dependencies": {
     "@prisma/adapter-pg": "7.10.1",
@@ -28,7 +29,11 @@
     "pg": "8.23.1"
   },
   "devDependencies": {
+    "@testcontainers/postgresql": "12.2.1",
+    "@types/jest": "30.0.0",
     "@types/pg": "8.23.1",
-    "prisma": "7.10.1"
+    "jest": "30.5.2",
+    "prisma": "7.10.1",
+    "ts-jest": "29.4.15"
   }
 }

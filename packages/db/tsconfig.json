@@ -4,7 +4,7 @@
     "rootDir": ".",
     "outDir": "dist",
     "noEmit": true,
-    "types": ["node"]
+    "types": ["node", "jest"]
   },
-  "include": ["src", "test", "prisma.config.ts"]
+  "include": ["src", "test", "prisma.config.ts", "jest.config.mjs"]
 }
