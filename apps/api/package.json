@@ -11,6 +11,7 @@
     "test": "node --experimental-vm-modules ./node_modules/jest/bin/jest.js"
   },
   "dependencies": {
+    "@knowgate/db": "workspace:*",
     "@knowgate/shared": "workspace:*",
     "@nestjs/common": "12.4.0",
     "@nestjs/config": "12.1.1",

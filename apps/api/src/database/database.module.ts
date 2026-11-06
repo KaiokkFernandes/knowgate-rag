@@ -1,14 +1,16 @@
 import { Global, Inject, Module, type OnApplicationShutdown } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { createPrismaClient, type PrismaClient } from '@knowgate/db';
 import { Pool } from 'pg';
 import type { Env } from '../config/env';
 
 export const PG_POOL = Symbol('PG_POOL');
+export const PRISMA = Symbol('PRISMA');
 
 /**
- * Provides a single shared PostgreSQL connection pool.
- * In phase 1b Prisma will be built on top of this same pool (driver adapter),
- * and the raw pgvector / full-text queries can use it directly.
+ * Provides one shared PostgreSQL pool and a PrismaClient built on top of it.
+ * Prisma (regular queries) and raw pgvector / full-text SQL (ChunkRepository, phase 2)
+ * therefore share the same connections and the same pool limits.
  */
 @Global()
 @Module({
@@ -23,13 +25,23 @@ export const PG_POOL = Symbol('PG_POOL');
           connectionTimeoutMillis: 5_000,
         }),
     },
+    {
+      provide: PRISMA,
+      inject: [PG_POOL],
+      useFactory: (pool: Pool) => createPrismaClient(pool),
+    },
   ],
-  exports: [PG_POOL],
+  exports: [PG_POOL, PRISMA],
 })
 export class DatabaseModule implements OnApplicationShutdown {
-  constructor(@Inject(PG_POOL) private readonly pool: Pool) {}
+  constructor(
+    @Inject(PG_POOL) private readonly pool: Pool,
+    @Inject(PRISMA) private readonly prisma: PrismaClient,
+  ) {}
 
   async onApplicationShutdown(): Promise<void> {
+    // Prisma does not end a pool it did not create, so the pool is closed explicitly after it.
+    await this.prisma.$disconnect();
     await this.pool.end();
   }
 }
