@@ -1,9 +1,77 @@
-# Local infrastructure for KnowGate.
-# Phase 1a: only Postgres (+pgvector) and Redis. The API and the web app run on
-# the host with `pnpm dev`; they join this file (under a profile) in phase 1b.
+# Local stack for KnowGate.
+#   docker compose up -d                -> Postgres (+pgvector) and Redis only (for `pnpm dev`)
+#   docker compose --profile app up -d  -> also migrations, the API and the web app (built images)
+# Set COMPOSE_PROFILES=app in .env to make the full stack the default.
 name: knowgate
 
+# Shared by the migrate and api services: inside the Compose network Postgres is `postgres:5432`,
+# not the host port. The password must be URL-safe (letters and digits, as `openssl rand -hex`).
+x-database-url: &database-url postgresql://${POSTGRES_USER:-knowgate}:${POSTGRES_PASSWORD:-knowgate}@postgres:5432/${POSTGRES_DB:-knowgate}
+
 services:
+  migrate:
+    profiles: [app]
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+      target: migrate
+    image: knowgate-migrate
+    environment:
+      DATABASE_URL: *database-url
+    depends_on:
+      postgres:
+        condition: service_healthy
+    # One-shot job: applies pending migrations and exits.
+    restart: 'no'
+
+  api:
+    profiles: [app]
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+      target: runtime
+    image: knowgate-api
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      API_PORT: 3001
+      WEB_URL: ${WEB_URL:-http://localhost:3000}
+      DATABASE_URL: *database-url
+      REDIS_URL: redis://redis:6379
+      # No default on purpose: the API's env validation refuses to boot without a 32+ char secret.
+      # (`${JWT_SECRET:?}` would also break `docker compose up` for the infra-only profile.)
+      JWT_SECRET: ${JWT_SECRET:-}
+      JWT_ACCESS_TTL_SECONDS: ${JWT_ACCESS_TTL_SECONDS:-900}
+      REFRESH_TOKEN_TTL_DAYS: ${REFRESH_TOKEN_TTL_DAYS:-7}
+      RATE_LIMIT_PER_MINUTE: ${RATE_LIMIT_PER_MINUTE:-100}
+      AUTH_RATE_LIMIT_PER_MINUTE: ${AUTH_RATE_LIMIT_PER_MINUTE:-5}
+      DAILY_TOKEN_LIMIT_DEFAULT: ${DAILY_TOKEN_LIMIT_DEFAULT:-200000}
+    ports:
+      - '127.0.0.1:${API_PORT:-3001}:3001'
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+
+  web:
+    profiles: [app]
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+      args:
+        # Inlined into the browser bundle: the URL the *browser* uses to reach the API.
+        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:3001}
+    image: knowgate-web
+    restart: unless-stopped
+    ports:
+      - '127.0.0.1:${WEB_PORT:-3000}:3000'
+    depends_on:
+      api:
+        condition: service_healthy
+
   postgres:
     # Official pgvector image: pins both the extension (0.8.7) and Postgres major (18).
     image: pgvector/pgvector:0.8.7-pg18-trixie
