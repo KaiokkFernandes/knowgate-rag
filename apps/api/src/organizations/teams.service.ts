@@ -36,8 +36,8 @@ export class TeamsService {
 
   /**
    * Team memberships and document shares go with the team (ON DELETE CASCADE).
-   * A TEAMS-visibility document shared only with this team becomes visible to no member;
-   * the documents module (phase 2) must account for that.
+   * A TEAMS-visibility document shared only with this team stays visible to admins only
+   * (see documentAccessWhere) until it is shared again.
    */
   async remove(organizationId: string, teamId: string): Promise<void> {
     const { count } = await this.prisma.team.deleteMany({ where: { id: teamId, organizationId } });
