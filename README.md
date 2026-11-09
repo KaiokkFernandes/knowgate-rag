@@ -3,7 +3,7 @@
 > Internal knowledge assistant that answers from company documents **with citations**, shows each
 > user **only what their team can see**, and **masks personal data** before anything reaches the LLM.
 
-**Status:** phase 1d — organizations, members, teams and role-based access control.
+**Status:** phase 1e — the whole stack runs with Docker Compose.
 
 ## The problem
 
@@ -51,6 +51,17 @@ curl http://localhost:3001/health
 
 `GET /health` returns `200` when Postgres and Redis respond, and `503` with the failing dependency
 otherwise.
+
+### Everything in Docker
+
+```bash
+cp .env.example .env          # set JWT_SECRET (openssl rand -hex 32) and POSTGRES_PASSWORD
+docker compose --profile app up -d --build
+```
+
+This builds the images, runs the migrations as a one-shot `migrate` job, then starts the API
+(`:3001`) and the web app (`:3000`), each waiting for its dependencies to be healthy. Set
+`COMPOSE_PROFILES=app` in `.env` to make it the default for `docker compose up`.
 
 ### Scripts (root)
 
@@ -128,11 +139,27 @@ otherwise.
   Without the lock, two admins demoting each other at the same time left the organization with
   no admin in 7 of 8 attempts; with it, an integration test runs the race and always keeps one.
 
+### Docker images
+
+- **Multi-stage builds** from the repository root: `pnpm fetch` caches dependencies by lockfile
+  only, so changing code does not reinstall them; the runtime stage gets only what it runs.
+- **API:** `pnpm deploy --prod` copies the API with its production dependencies and the built
+  workspace packages, without dev tools or sources. Migrations ship in a separate `migrate`
+  target, so the server image carries no migration files.
+- **Web:** Next.js `standalone` output (only the traced files plus a minimal `server.js`).
+  `NEXT_PUBLIC_API_URL` is a build argument because Next inlines it in the browser bundle.
+- **Debian slim, not Alpine:** Prisma and Argon2 ship prebuilt native binaries for glibc; musl
+  needs different binaries and is a common source of runtime errors.
+- **Hardened:** non-root `node` user, healthchecks, ports bound to `127.0.0.1`, `.env` excluded
+  by `.dockerignore`; secrets reach containers only as environment variables at runtime.
+
 To be documented as the project evolves: chunk size, hybrid search with RRF, masking and LLM
 cost control.
 
 ## Known limitations
 
+- The API image (~190 MB compressed) still contains the Prisma CLI: `@prisma/client` declares it
+  as a peer, and pnpm links it from the `@knowgate/db` dev dependency even in a production deploy.
 - Accented Portuguese stopwords ("são", "já") are unaccented before the stopword check and are
   kept as search tokens, which adds a little noise to full-text ranking.
 - Changing the `portuguese_unaccent` configuration does not recompute existing `searchVector`
