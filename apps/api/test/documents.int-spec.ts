@@ -202,6 +202,35 @@ describe('Documents (integration)', () => {
     });
   });
 
+  describe('personal data', () => {
+    it('masks CPF, CNPJ, e-mail and phone before storing (nothing raw reaches the database)', async () => {
+      const admin = await registerUser(app);
+      const orgId = await createOrg(admin);
+      // Test values (valid check digits, not real people or companies).
+      const raw = ['529.982.247-25', '11.222.333/0001-81', 'joana@acme.test', '(11) 98765-4321'];
+      const markdown = `# Contato de joana@acme.test\nCPF ${raw[0]}, CNPJ ${raw[1]}, e-mail ${raw[2]}, tel. ${raw[3]}.`;
+
+      const document = (
+        await as(admin).upload(orgId, Buffer.from(markdown), 'Ficha 529.982.247-25.md').expect(201)
+      ).body as DocumentView;
+
+      const { rows } = await pool.query<{ content: string; reference: string; title: string }>(
+        `SELECT c.content, c.reference, d.title
+           FROM "Chunk" c JOIN "Document" d ON d.id = c."documentId"
+          WHERE c."documentId" = $1`,
+        [document.id],
+      );
+      expect(rows).toHaveLength(1);
+      expect(rows[0]?.content).toBe(
+        '# Contato de [EMAIL]\nCPF [CPF], CNPJ [CNPJ], e-mail [EMAIL], tel. [TELEFONE].',
+      );
+      expect(rows[0]?.reference).toBe('Contato de [EMAIL]');
+      expect(rows[0]?.title).toBe('Ficha [CPF]');
+      const stored = JSON.stringify(rows);
+      for (const value of raw) expect(stored).not.toContain(value);
+    });
+  });
+
   describe('visibility', () => {
     it('shows TEAMS documents only to members of the listed teams', async () => {
       const admin = await registerUser(app);

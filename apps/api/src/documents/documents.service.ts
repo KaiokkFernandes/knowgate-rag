@@ -1,5 +1,6 @@
 import {
   BadRequestException,
+  Logger,
   Inject,
   Injectable,
   NotFoundException,
@@ -14,7 +15,8 @@ import type { OrgMembership } from '../organizations/org-access';
 import { documentAccessWhere } from './document-access';
 import { chunkSections, type ChunkOptions } from './ingestion/chunker';
 import { detectSourceType } from './ingestion/file-type';
-import { parseDocument } from './ingestion/parsers';
+import { parseDocument, type Section } from './ingestion/parsers';
+import { maskPii, totalMasked } from '../privacy/pii-masker';
 
 /** The parts of the multer file the service uses (memory storage). */
 export interface UploadedDocumentFile {
@@ -45,6 +47,7 @@ function toView({ documentTeams, _count, ...document }: DocumentRow) {
 
 @Injectable()
 export class DocumentsService {
+  private readonly logger = new Logger(DocumentsService.name);
   private readonly chunkOptions: ChunkOptions;
 
   constructor(
@@ -69,7 +72,10 @@ export class DocumentsService {
   ) {
     const { organizationId } = membership;
     const sourceType = detectSourceType(file.originalname, file.buffer);
-    const chunks = chunkSections(await parseDocument(sourceType, file.buffer), this.chunkOptions);
+    // Personal data is masked before anything is stored or sent to the embeddings API, so the
+    // database, Voyage and Claude only ever see placeholders such as [CPF].
+    const sections = maskSections(await parseDocument(sourceType, file.buffer));
+    const chunks = chunkSections(sections.sections, this.chunkOptions);
     if (chunks.length === 0) {
       throw new UnprocessableEntityException(
         'The file has no extractable text (scanned PDFs are not supported)',
@@ -88,7 +94,7 @@ export class DocumentsService {
       const created = await tx.document.create({
         data: {
           organizationId,
-          title: fields.title ?? stripExtension(file.originalname),
+          title: maskPii(fields.title ?? stripExtension(file.originalname)).text,
           sourceType,
           visibility: fields.visibility,
           createdById: membership.userId,
@@ -101,6 +107,10 @@ export class DocumentsService {
       });
       return tx.document.findUniqueOrThrow({ where: { id: created.id }, select: documentSelect });
     });
+    // Counts only: the masked values themselves are never logged.
+    if (sections.masked > 0) {
+      this.logger.log(`Document ${document.id}: ${sections.masked} personal data items masked`);
+    }
     return toView(document);
   }
 
@@ -130,6 +140,19 @@ export class DocumentsService {
     });
     if (count === 0) throw new NotFoundException('Document not found');
   }
+}
+
+function maskSections(sections: Section[]): { sections: Section[]; masked: number } {
+  let masked = 0;
+  const result = sections.map((section) => ({
+    reference: section.reference === null ? null : maskPii(section.reference).text,
+    paragraphs: section.paragraphs.map((paragraph) => {
+      const { text, counts } = maskPii(paragraph);
+      masked += totalMasked(counts);
+      return text;
+    }),
+  }));
+  return { sections: result, masked };
 }
 
 function stripExtension(fileName: string): string {
