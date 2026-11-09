@@ -5,7 +5,7 @@
 > Internal knowledge assistant that answers from company documents **with citations**, shows each
 > user **only what their team can see**, and **masks personal data** before anything reaches the LLM.
 
-**Status:** phase 2b — personal data masking and background embeddings (Voyage).
+**Status:** phase 2 complete — upload, masking, embeddings and hybrid search with access control.
 
 ## The problem
 
@@ -205,6 +205,38 @@ On a fresh clone, run `pnpm build` once before `pnpm lint` or `pnpm typecheck`: 
 - **Cost:** each batch records a `UsageEvent` (`EMBEDDING`) with the exact token count from the
   API and its list-price cost ($0.12 per million tokens).
 
+### Hybrid search
+
+`POST /orgs/:orgId/search` with `{ "query": "...", "limit": 8 }` (any member) returns the chunks
+the user may read, each with document title, reference (page or section), content and scores.
+
+- **Two retrievers, one ranking:** vector similarity (pgvector, cosine, HNSW) finds paraphrases;
+  Portuguese full-text (`portuguese_unaccent`) finds exact terms, codes and names that embeddings
+  blur. Each takes its best 40 candidates and **Reciprocal Rank Fusion** combines them
+  (`score = Σ 1 / (60 + rank)`): it uses ranks only, so cosine distance and `ts_rank` never need
+  to be put on the same scale.
+- **OR semantics for questions:** `plainto_tsquery` requires every word, too strict for a natural
+  question; the words are joined with OR and `ts_rank_cd` still favors chunks matching more of
+  them.
+- **Access filter inside the SQL**, never after it: tenant, `READY` documents, then `ORG` or a
+  team of the user (admins: every document of the organization). Filtering the top-k afterwards
+  would leak nothing but would silently return fewer results.
+- **HNSW and filters:** HNSW filters _after_ finding the nearest neighbors. If they all belong to
+  documents the user cannot see, an index scan returns nothing. pgvector 0.8 iterative scans
+  (`SET LOCAL hnsw.iterative_scan = relaxed_order`, transaction-scoped) keep scanning until enough
+  rows pass the filter.
+  - What the tests showed: for a few thousand chunks Postgres prefers an exact plan (B-tree on
+    the tenant plus a sort), so the problem only appears at scale. The test forces the HNSW plan
+    to prove it: a member next to 2,000 invisible chunks gets **0** results without iterative
+    scan and **3** with it.
+- **Privacy and cost:** the question is masked like the documents before being embedded
+  (`input_type: query`); its embedding is recorded in `UsageEvent`. When the user can read
+  nothing, the search returns early without calling the provider. The question travels in a POST
+  body, so it never ends up in URLs or access logs.
+- **Tests:** tenant isolation with a question identical to another organization's content, a
+  small organization next to a much larger one, team visibility (member, outsider, admin) and
+  `READY`-only search.
+
 ### Continuous integration
 
 GitHub Actions runs three parallel jobs on every pull request and on `main`:
@@ -233,8 +265,8 @@ GitHub Actions runs three parallel jobs on every pull request and on `main`:
 - **Hardened:** non-root `node` user, healthchecks, ports bound to `127.0.0.1`, `.env` excluded
   by `.dockerignore`; secrets reach containers only as environment variables at runtime.
 
-To be documented as the project evolves: chunk size, hybrid search with RRF, masking and LLM
-cost control.
+To be documented as the project evolves: answers with citations, the relevance threshold for "not
+found" and LLM cost control (phase 3).
 
 ## Known limitations
 
@@ -245,6 +277,10 @@ cost control.
 - The embedding queue lives in the API process: with several instances, two of them could
   process the same document after a restart (paying twice). Phase 6 moves it to SQS.
 - Recorded embedding cost is the list price; Voyage's free tokens are not deducted.
+- Search returns ranked chunks only; the relevance threshold for answering "not found" is set
+  in phase 3 and tuned with the eval (phase 5). Reranking is an optional next step.
+- The access rule exists twice (Prisma for listing, SQL for search); integration tests cover
+  both, and Row Level Security (planned) would add a database-level backstop.
 - Masking covers structured identifiers only: names and addresses are not detected. Masked
   values cannot be answered (by design).
 - The API image (~190 MB compressed) still contains the Prisma CLI: `@prisma/client` declares it

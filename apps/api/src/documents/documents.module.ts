@@ -25,5 +25,6 @@ import { EmbeddingWorker } from './embedding.worker';
   ],
   controllers: [DocumentsController],
   providers: [DocumentsService, ChunkRepository, EmbeddingWorker],
+  exports: [ChunkRepository],
 })
 export class DocumentsModule {}
