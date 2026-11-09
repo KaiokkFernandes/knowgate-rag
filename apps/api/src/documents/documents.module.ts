@@ -2,8 +2,10 @@ import { Module } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { MulterModule } from '@nestjs/platform-express';
 import type { Env } from '../config/env';
+import { ChunkRepository } from './chunk.repository';
 import { DocumentsController } from './documents.controller';
 import { DocumentsService } from './documents.service';
+import { EmbeddingWorker } from './embedding.worker';
 
 @Module({
   imports: [
@@ -22,6 +24,6 @@ import { DocumentsService } from './documents.service';
     }),
   ],
   controllers: [DocumentsController],
-  providers: [DocumentsService],
+  providers: [DocumentsService, ChunkRepository, EmbeddingWorker],
 })
 export class DocumentsModule {}

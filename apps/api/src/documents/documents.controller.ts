@@ -52,6 +52,17 @@ export class DocumentsController {
     return this.documents.get(membership, documentId);
   }
 
+  /** 202: accepted, the embeddings are computed in the background. */
+  @Post(':documentId/reprocess')
+  @Roles('ADMIN')
+  @HttpCode(HttpStatus.ACCEPTED)
+  reprocess(
+    @CurrentMembership() membership: OrgMembership,
+    @Param('documentId', uuidParam()) documentId: string,
+  ): Promise<void> {
+    return this.documents.reprocess(membership.organizationId, documentId);
+  }
+
   @Delete(':documentId')
   @Roles('ADMIN')
   @HttpCode(HttpStatus.NO_CONTENT)

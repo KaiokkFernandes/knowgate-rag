@@ -1,5 +1,6 @@
 import {
   BadRequestException,
+  ConflictException,
   Logger,
   Inject,
   Injectable,
@@ -13,6 +14,7 @@ import type { Env } from '../config/env';
 import { PRISMA } from '../database/database.module';
 import type { OrgMembership } from '../organizations/org-access';
 import { documentAccessWhere } from './document-access';
+import { EmbeddingWorker } from './embedding.worker';
 import { chunkSections, type ChunkOptions } from './ingestion/chunker';
 import { detectSourceType } from './ingestion/file-type';
 import { parseDocument, type Section } from './ingestion/parsers';
@@ -52,6 +54,7 @@ export class DocumentsService {
 
   constructor(
     @Inject(PRISMA) private readonly prisma: PrismaClient,
+    private readonly worker: EmbeddingWorker,
     config: ConfigService<Env, true>,
   ) {
     this.chunkOptions = {
@@ -107,6 +110,8 @@ export class DocumentsService {
       });
       return tx.document.findUniqueOrThrow({ where: { id: created.id }, select: documentSelect });
     });
+    // Embeddings are computed in the background; the client polls the document status.
+    this.worker.enqueue(document.id);
     // Counts only: the masked values themselves are never logged.
     if (sections.masked > 0) {
       this.logger.log(`Document ${document.id}: ${sections.masked} personal data items masked`);
@@ -131,6 +136,25 @@ export class DocumentsService {
     });
     if (!document) throw new NotFoundException('Document not found');
     return toView(document);
+  }
+
+  /**
+   * Retries a FAILED document. Only chunks still without an embedding are sent again, so the
+   * work already paid for is kept.
+   */
+  async reprocess(organizationId: string, documentId: string) {
+    const { count } = await this.prisma.document.updateMany({
+      where: { organizationId, id: documentId, status: 'FAILED' },
+      data: { status: 'PENDING' },
+    });
+    if (count === 0) {
+      const exists = await this.prisma.document.count({
+        where: { organizationId, id: documentId },
+      });
+      if (!exists) throw new NotFoundException('Document not found');
+      throw new ConflictException('Only FAILED documents can be reprocessed');
+    }
+    this.worker.enqueue(documentId);
   }
 
   /** Chunks and team shares go with the document (ON DELETE CASCADE). */
