@@ -5,7 +5,7 @@
 > Internal knowledge assistant that answers from company documents **with citations**, shows each
 > user **only what their team can see**, and **masks personal data** before anything reaches the LLM.
 
-**Status:** phase 2a — document upload, parsing and chunking with team visibility.
+**Status:** phase 2b — personal data masking and background embeddings (Voyage).
 
 ## The problem
 
@@ -175,6 +175,36 @@ On a fresh clone, run `pnpm build` once before `pnpm lint` or `pnpm typecheck`: 
   - Tokens are estimated as characters / 4 (no tokenizer dependency); the exact number of
     embedded tokens comes from the embeddings API.
 
+### Personal data masking
+
+- CPF, CNPJ (numeric and the new alphanumeric format), e-mail and phone numbers are replaced by
+  `[CPF]`, `[CNPJ]`, `[EMAIL]` and `[TELEFONE]` **at ingestion**, before anything is stored: the
+  database, the embeddings API and Claude only ever see placeholders (data minimization, LGPD).
+- **Privacy first, few false positives:** a formatted value (`529.982.247-25`) is always masked; a
+  bare digit run is masked as CPF/CNPJ only when its check digits are valid, so order numbers and
+  amounts are kept. Phones need an area code, so `2025-2026` is not a phone.
+- Logs record how many items were masked, never the values.
+
+### Embeddings
+
+- **Provider interface:** `EmbeddingProvider` with a Voyage implementation (REST API via `fetch`,
+  one endpoint, so no SDK) and a deterministic offline fake (hashing trick) for tests and local
+  development. The env validation refuses the paid provider when `NODE_ENV=test` and the fake one
+  in production.
+- **Model:** `voyage-4-large`, 1024 dimensions, `input_type: document` for chunks (`query` for
+  questions, in phase 2c); `truncation: false`, so an oversized text fails instead of being
+  silently cut.
+- **Resilience:** requests are batched under the API limits (128 texts, ~80K estimated tokens,
+  for a 120K limit); 429, 5xx, network errors and timeouts are retried with exponential backoff,
+  full jitter and `Retry-After`. Other 4xx fail immediately. Errors never include the key or the
+  text.
+- **Background worker:** the upload answers right away with `PENDING`; an in-process queue embeds
+  one document at a time (`PROCESSING`, then `READY` or `FAILED`). It is **resumable**: only
+  chunks without an embedding are sent, and unfinished documents are picked up again when the API
+  starts, so a crash never pays twice for the same chunk.
+- **Cost:** each batch records a `UsageEvent` (`EMBEDDING`) with the exact token count from the
+  API and its list-price cost ($0.12 per million tokens).
+
 ### Continuous integration
 
 GitHub Actions runs three parallel jobs on every pull request and on `main`:
@@ -212,6 +242,11 @@ cost control.
   moves to a queue and a worker (S3, SQS, Lambda) in phase 6. The original file is not stored:
   citations point to the stored chunk text.
 - Scanned PDFs (images without a text layer) are rejected; OCR is out of scope.
+- The embedding queue lives in the API process: with several instances, two of them could
+  process the same document after a restart (paying twice). Phase 6 moves it to SQS.
+- Recorded embedding cost is the list price; Voyage's free tokens are not deducted.
+- Masking covers structured identifiers only: names and addresses are not detected. Masked
+  values cannot be answered (by design).
 - The API image (~190 MB compressed) still contains the Prisma CLI: `@prisma/client` declares it
   as a peer, and pnpm links it from the `@knowgate/db` dev dependency even in a production deploy.
 - Accented Portuguese stopwords ("são", "já") are unaccented before the stopword check and are
