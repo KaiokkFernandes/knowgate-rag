@@ -5,7 +5,7 @@
 > Internal knowledge assistant that answers from company documents **with citations**, shows each
 > user **only what their team can see**, and **masks personal data** before anything reaches the LLM.
 
-**Status:** phase 1 complete — auth, organizations, teams and roles, Docker Compose and CI.
+**Status:** phase 2a — document upload, parsing and chunking with team visibility.
 
 ## The problem
 
@@ -144,6 +144,37 @@ On a fresh clone, run `pnpm build` once before `pnpm lint` or `pnpm typecheck`: 
   Without the lock, two admins demoting each other at the same time left the organization with
   no admin in 7 of 8 attempts; with it, an integration test runs the race and always keeps one.
 
+### Documents and chunking
+
+| Endpoint                                    | Who                                   |
+| ------------------------------------------- | ------------------------------------- |
+| `POST /orgs/:orgId/documents` (multipart)   | admins                                |
+| `GET /orgs/:orgId/documents[/:documentId]`  | members (only the documents they see) |
+| `DELETE /orgs/:orgId/documents/:documentId` | admins                                |
+
+- **Visibility:** `ORG` (every member) or `TEAMS` (members of the listed teams). Admins see every
+  document of the organization because they manage them. A document a user cannot see answers
+  `404`, the same as one that does not exist.
+- **Trust the content, not the name:** the type is checked by extension **and** content (PDF
+  magic bytes, strict UTF-8 without NUL bytes for text), so a renamed binary gets `415`. Files
+  over `UPLOAD_MAX_BYTES` get `413`; PDFs without a text layer (scans) get `422`. Uploads stay in
+  memory and are never written to disk.
+- **Fail fast, then store atomically:** parsing and chunking run inside the request, so a bad
+  file is rejected immediately; the document and all its chunks are then written in one
+  transaction. The document stays `PENDING` until its chunks get embeddings.
+- **Parsing keeps the citation target:** PDF text per page (`unpdf`, a server build of Mozilla's
+  pdf.js, no native dependencies), Markdown per heading (reference = heading trail, such as
+  `Reembolso > Prazos`), plain text per paragraph range.
+- **Structure-aware chunking:** paragraphs are packed up to **400 estimated tokens** with
+  **60 tokens (15%) of overlap**; a chunk never crosses a page or section, so every chunk has an
+  exact reference. Oversized paragraphs are split by sentence, then by word.
+  - Why 400: internal policies and manuals have short sections; small chunks make citations
+    precise and keep the prompt cheap. The cost is less surrounding context per chunk, which
+    Contextual Retrieval (phase 5) addresses. Both values are settings, to be compared in the
+    eval.
+  - Tokens are estimated as characters / 4 (no tokenizer dependency); the exact number of
+    embedded tokens comes from the embeddings API.
+
 ### Continuous integration
 
 GitHub Actions runs three parallel jobs on every pull request and on `main`:
@@ -177,6 +208,10 @@ cost control.
 
 ## Known limitations
 
+- Uploads are parsed in the API process, which blocks the event loop for large PDFs; ingestion
+  moves to a queue and a worker (S3, SQS, Lambda) in phase 6. The original file is not stored:
+  citations point to the stored chunk text.
+- Scanned PDFs (images without a text layer) are rejected; OCR is out of scope.
 - The API image (~190 MB compressed) still contains the Prisma CLI: `@prisma/client` declares it
   as a peer, and pnpm links it from the `@knowgate/db` dev dependency even in a production deploy.
 - Accented Portuguese stopwords ("são", "já") are unaccented before the stopword check and are
@@ -189,7 +224,7 @@ cost control.
 - Members are added by e-mail only if they already have an account; invitation links for new
   users are a next step.
 - Deleting a team removes its document shares: a document restricted to that team only becomes
-  visible to no member until it is shared again (to be handled by the documents module).
+  visible to admins only until it is shared again.
 
 ---
 
