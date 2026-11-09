@@ -3,3 +3,4 @@ export * from './health.js';
 export * from './organizations.js';
 export * from './documents.js';
 export * from './search.js';
+export * from './chat.js';
