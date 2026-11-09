@@ -3,7 +3,7 @@
 > Internal knowledge assistant that answers from company documents **with citations**, shows each
 > user **only what their team can see**, and **masks personal data** before anything reaches the LLM.
 
-**Status:** phase 1c — authentication (register, login, refresh token rotation, logout).
+**Status:** phase 1d — organizations, members, teams and role-based access control.
 
 ## The problem
 
@@ -106,6 +106,28 @@ otherwise.
 - **Abuse protection:** Helmet headers; rate limit of 100 req/min per IP, 5 req/min on login and
   register (429 with `Retry-After`).
 
+### Organizations and access control
+
+| Endpoint                                               | Who        |
+| ------------------------------------------------------ | ---------- |
+| `POST /orgs` (creator becomes ADMIN)                   | any user   |
+| `GET /orgs/:orgId`, `GET .../members`, `GET .../teams` | members    |
+| `POST/PATCH/DELETE .../members[/:userId]`              | admins     |
+| `DELETE .../members/:ownId` (leave)                    | any member |
+| `POST/DELETE .../teams[/:teamId]`                      | admins     |
+| `PUT/DELETE .../teams/:teamId/members/:userId`         | admins     |
+
+- **Tenant in the route, membership checked per request:** a global guard runs on every route
+  with `:orgId` (secure by default) and loads the membership by primary key on each request.
+  Roles never live in the token, so removing a member or changing a role applies immediately.
+- **404 for non-members, 403 for insufficient role:** outsiders cannot tell whether an
+  organization exists; members already know it, so a missing role is a plain 403.
+- **No IDOR:** team queries always filter by the team id and the organization id from the route,
+  never by the id alone; composite foreign keys enforce the same rule in the database.
+- **Always one admin:** membership changes lock the organization row (`SELECT ... FOR UPDATE`).
+  Without the lock, two admins demoting each other at the same time left the organization with
+  no admin in 7 of 8 attempts; with it, an integration test runs the race and always keeps one.
+
 To be documented as the project evolves: chunk size, hybrid search with RRF, masking and LLM
 cost control.
 
@@ -118,6 +140,10 @@ cost control.
 - Rate limit counters live in memory: with several API instances they must move to Redis.
 - Registering an existing e-mail answers 409, which reveals that the account exists (mitigated by
   the rate limit; avoiding it would require e-mail confirmation, out of scope).
+- Members are added by e-mail only if they already have an account; invitation links for new
+  users are a next step.
+- Deleting a team removes its document shares: a document restricted to that team only becomes
+  visible to no member until it is shared again (to be handled by the documents module).
 
 ---
 
