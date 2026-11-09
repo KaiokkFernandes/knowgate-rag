@@ -1,9 +1,11 @@
 # KnowGate
 
+[![CI](https://github.com/KaiokkFernandes/knowgate-rag/actions/workflows/ci.yml/badge.svg)](https://github.com/KaiokkFernandes/knowgate-rag/actions/workflows/ci.yml)
+
 > Internal knowledge assistant that answers from company documents **with citations**, shows each
 > user **only what their team can see**, and **masks personal data** before anything reaches the LLM.
 
-**Status:** phase 1e — the whole stack runs with Docker Compose.
+**Status:** phase 1 complete — auth, organizations, teams and roles, Docker Compose and CI.
 
 ## The problem
 
@@ -62,6 +64,9 @@ docker compose --profile app up -d --build
 This builds the images, runs the migrations as a one-shot `migrate` job, then starts the API
 (`:3001`) and the web app (`:3000`), each waiting for its dependencies to be healthy. Set
 `COMPOSE_PROFILES=app` in `.env` to make it the default for `docker compose up`.
+
+On a fresh clone, run `pnpm build` once before `pnpm lint` or `pnpm typecheck`: they resolve
+`@knowgate/shared` from its build output and need the generated Prisma client.
 
 ### Scripts (root)
 
@@ -138,6 +143,20 @@ This builds the images, runs the migrations as a one-shot `migrate` job, then st
 - **Always one admin:** membership changes lock the organization row (`SELECT ... FOR UPDATE`).
   Without the lock, two admins demoting each other at the same time left the organization with
   no admin in 7 of 8 attempts; with it, an integration test runs the race and always keeps one.
+
+### Continuous integration
+
+GitHub Actions runs three parallel jobs on every pull request and on `main`:
+
+| Job           | What it proves                                                                           |
+| ------------- | ---------------------------------------------------------------------------------------- |
+| `check`       | Build, lint (including no secrets in `.env.example`), Prettier, typecheck, unit tests    |
+| `integration` | Integration tests against real Postgres (pgvector) and Redis containers (Testcontainers) |
+| `docker`      | The API, migrate and web images still build (no push), with layer cache                  |
+
+- **Supply chain:** third-party actions are pinned to a commit SHA, since a tag can be moved to
+  different code; the workflow token is read-only and the checkout does not persist it.
+- **No paid APIs in CI:** tests never call Claude or Voyage, so CI needs no secrets.
 
 ### Docker images
 
