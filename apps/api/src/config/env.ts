@@ -19,6 +19,8 @@ export const envSchema = z.object({
   // Requests per minute per IP: every route / login and register (brute-force protection).
   RATE_LIMIT_PER_MINUTE: z.coerce.number().int().positive().default(100),
   AUTH_RATE_LIMIT_PER_MINUTE: z.coerce.number().int().positive().default(5),
+  // Daily token budget given to new organizations (usage limit, phase 3).
+  DAILY_TOKEN_LIMIT_DEFAULT: z.coerce.number().int().positive().default(200_000),
 });
 
 export type Env = z.infer<typeof envSchema>;
