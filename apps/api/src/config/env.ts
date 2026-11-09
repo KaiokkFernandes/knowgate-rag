@@ -31,10 +31,29 @@ export const envSchema = z
     // Chunk size in estimated tokens and the overlap between consecutive chunks (README).
     CHUNK_TARGET_TOKENS: z.coerce.number().int().min(50).default(400),
     CHUNK_OVERLAP_TOKENS: z.coerce.number().int().min(0).default(60),
+    // `fake`: deterministic local vectors, no network and no cost (tests and local development).
+    EMBEDDING_PROVIDER: z.enum(['voyage', 'fake']).default('voyage'),
+    VOYAGE_API_KEY: z.string().optional(),
+    VOYAGE_MODEL: z.string().default('voyage-4-large'),
+    // Must match the vector(1024) column; changing it requires a migration.
+    EMBEDDING_DIMENSION: z.coerce.number().pipe(z.literal(1024)).default(1024),
   })
   .refine((env) => env.CHUNK_OVERLAP_TOKENS < env.CHUNK_TARGET_TOKENS, {
     path: ['CHUNK_OVERLAP_TOKENS'],
     error: 'CHUNK_OVERLAP_TOKENS must be smaller than CHUNK_TARGET_TOKENS',
+  })
+  .refine((env) => env.EMBEDDING_PROVIDER !== 'voyage' || !!env.VOYAGE_API_KEY, {
+    path: ['VOYAGE_API_KEY'],
+    error: 'VOYAGE_API_KEY is required when EMBEDDING_PROVIDER=voyage',
+  })
+  // Tests never call paid APIs (CLAUDE.md §9), even if a real key is present in .env.
+  .refine((env) => env.NODE_ENV !== 'test' || env.EMBEDDING_PROVIDER === 'fake', {
+    path: ['EMBEDDING_PROVIDER'],
+    error: 'Tests must use EMBEDDING_PROVIDER=fake',
+  })
+  .refine((env) => env.NODE_ENV !== 'production' || env.EMBEDDING_PROVIDER !== 'fake', {
+    path: ['EMBEDDING_PROVIDER'],
+    error: 'The fake embedding provider is not allowed in production',
   });
 
 export type Env = z.infer<typeof envSchema>;

@@ -1,5 +1,7 @@
 import {
   BadRequestException,
+  ConflictException,
+  Logger,
   Inject,
   Injectable,
   NotFoundException,
@@ -12,9 +14,11 @@ import type { Env } from '../config/env';
 import { PRISMA } from '../database/database.module';
 import type { OrgMembership } from '../organizations/org-access';
 import { documentAccessWhere } from './document-access';
+import { EmbeddingWorker } from './embedding.worker';
 import { chunkSections, type ChunkOptions } from './ingestion/chunker';
 import { detectSourceType } from './ingestion/file-type';
-import { parseDocument } from './ingestion/parsers';
+import { parseDocument, type Section } from './ingestion/parsers';
+import { maskPii, totalMasked } from '../privacy/pii-masker';
 
 /** The parts of the multer file the service uses (memory storage). */
 export interface UploadedDocumentFile {
@@ -45,10 +49,12 @@ function toView({ documentTeams, _count, ...document }: DocumentRow) {
 
 @Injectable()
 export class DocumentsService {
+  private readonly logger = new Logger(DocumentsService.name);
   private readonly chunkOptions: ChunkOptions;
 
   constructor(
     @Inject(PRISMA) private readonly prisma: PrismaClient,
+    private readonly worker: EmbeddingWorker,
     config: ConfigService<Env, true>,
   ) {
     this.chunkOptions = {
@@ -69,7 +75,10 @@ export class DocumentsService {
   ) {
     const { organizationId } = membership;
     const sourceType = detectSourceType(file.originalname, file.buffer);
-    const chunks = chunkSections(await parseDocument(sourceType, file.buffer), this.chunkOptions);
+    // Personal data is masked before anything is stored or sent to the embeddings API, so the
+    // database, Voyage and Claude only ever see placeholders such as [CPF].
+    const sections = maskSections(await parseDocument(sourceType, file.buffer));
+    const chunks = chunkSections(sections.sections, this.chunkOptions);
     if (chunks.length === 0) {
       throw new UnprocessableEntityException(
         'The file has no extractable text (scanned PDFs are not supported)',
@@ -88,7 +97,7 @@ export class DocumentsService {
       const created = await tx.document.create({
         data: {
           organizationId,
-          title: fields.title ?? stripExtension(file.originalname),
+          title: maskPii(fields.title ?? stripExtension(file.originalname)).text,
           sourceType,
           visibility: fields.visibility,
           createdById: membership.userId,
@@ -101,6 +110,12 @@ export class DocumentsService {
       });
       return tx.document.findUniqueOrThrow({ where: { id: created.id }, select: documentSelect });
     });
+    // Embeddings are computed in the background; the client polls the document status.
+    this.worker.enqueue(document.id);
+    // Counts only: the masked values themselves are never logged.
+    if (sections.masked > 0) {
+      this.logger.log(`Document ${document.id}: ${sections.masked} personal data items masked`);
+    }
     return toView(document);
   }
 
@@ -123,6 +138,25 @@ export class DocumentsService {
     return toView(document);
   }
 
+  /**
+   * Retries a FAILED document. Only chunks still without an embedding are sent again, so the
+   * work already paid for is kept.
+   */
+  async reprocess(organizationId: string, documentId: string) {
+    const { count } = await this.prisma.document.updateMany({
+      where: { organizationId, id: documentId, status: 'FAILED' },
+      data: { status: 'PENDING' },
+    });
+    if (count === 0) {
+      const exists = await this.prisma.document.count({
+        where: { organizationId, id: documentId },
+      });
+      if (!exists) throw new NotFoundException('Document not found');
+      throw new ConflictException('Only FAILED documents can be reprocessed');
+    }
+    this.worker.enqueue(documentId);
+  }
+
   /** Chunks and team shares go with the document (ON DELETE CASCADE). */
   async remove(organizationId: string, documentId: string): Promise<void> {
     const { count } = await this.prisma.document.deleteMany({
@@ -130,6 +164,19 @@ export class DocumentsService {
     });
     if (count === 0) throw new NotFoundException('Document not found');
   }
+}
+
+function maskSections(sections: Section[]): { sections: Section[]; masked: number } {
+  let masked = 0;
+  const result = sections.map((section) => ({
+    reference: section.reference === null ? null : maskPii(section.reference).text,
+    paragraphs: section.paragraphs.map((paragraph) => {
+      const { text, counts } = maskPii(paragraph);
+      masked += totalMasked(counts);
+      return text;
+    }),
+  }));
+  return { sections: result, masked };
 }
 
 function stripExtension(fileName: string): string {

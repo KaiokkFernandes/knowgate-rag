@@ -29,6 +29,8 @@ export default async function globalSetup(): Promise<void> {
   process.env.REDIS_URL = redis.getConnectionUrl();
   process.env.NODE_ENV = 'test';
   process.env.JWT_SECRET = 'integration-test-secret-with-at-least-32-chars';
+  // Never the paid API: env validation also refuses `voyage` when NODE_ENV=test.
+  process.env.EMBEDDING_PROVIDER = 'fake';
 
   (globalThis as Record<string, unknown>).__CONTAINERS__ = [postgres, redis];
 }
