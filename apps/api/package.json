@@ -2,15 +2,6 @@
   "name": "@knowgate/api",
   "version": "0.0.0",
   "private": true,
-  "scripts": {
-    "build": "nest build",
-    "dev": "nest start --watch --preserveWatchOutput",
-    "start": "node dist/main",
-    "lint": "eslint .",
-    "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "node --experimental-vm-modules ./node_modules/jest/bin/jest.js",
-    "test:integration": "node --experimental-vm-modules ./node_modules/jest/bin/jest.js --config jest.integration.config.mjs"
-  },
   "dependencies": {
     "@knowgate/db": "workspace:*",
     "@knowgate/shared": "workspace:*",
@@ -44,5 +35,17 @@
     "jest": "30.5.2",
     "supertest": "7.3.1",
     "ts-jest": "29.4.15"
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "nest build",
+    "dev": "nest start --watch --preserveWatchOutput",
+    "start": "node dist/main",
+    "lint": "eslint .",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "node --experimental-vm-modules ./node_modules/jest/bin/jest.js",
+    "test:integration": "node --experimental-vm-modules ./node_modules/jest/bin/jest.js --config jest.integration.config.mjs"
   }
 }
