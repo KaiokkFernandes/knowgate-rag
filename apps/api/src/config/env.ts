@@ -37,6 +37,17 @@ export const envSchema = z
     VOYAGE_MODEL: z.string().default('voyage-4-large'),
     // Must match the vector(1024) column; changing it requires a migration.
     EMBEDDING_DIMENSION: z.coerce.number().pipe(z.literal(1024)).default(1024),
+    // `fake`: deterministic offline answers that cite the first source (tests, local development).
+    LLM_PROVIDER: z.enum(['anthropic', 'fake']).default('anthropic'),
+    ANTHROPIC_API_KEY: z.string().optional(),
+    CLAUDE_MODEL: z.string().default('claude-haiku-5-5'),
+    // Grounded Q&A over a few short sources: low effort keeps latency and cost down.
+    CLAUDE_EFFORT: z.enum(['low', 'medium', 'high', 'xhigh', 'max']).default('low'),
+    // Hard cap per answer (cost control); answers are a few paragraphs.
+    CLAUDE_MAX_TOKENS: z.coerce.number().int().min(256).max(16_000).default(2048),
+    // "No basis, no answer": sources below this cosine similarity are not sent to the model.
+    CHAT_MIN_SIMILARITY: z.coerce.number().min(0).max(1).default(0.4),
+    CHAT_MAX_SOURCES: z.coerce.number().int().min(1).max(20).default(6),
   })
   .refine((env) => env.CHUNK_OVERLAP_TOKENS < env.CHUNK_TARGET_TOKENS, {
     path: ['CHUNK_OVERLAP_TOKENS'],
@@ -54,6 +65,18 @@ export const envSchema = z
   .refine((env) => env.NODE_ENV !== 'production' || env.EMBEDDING_PROVIDER !== 'fake', {
     path: ['EMBEDDING_PROVIDER'],
     error: 'The fake embedding provider is not allowed in production',
+  })
+  .refine((env) => env.LLM_PROVIDER !== 'anthropic' || !!env.ANTHROPIC_API_KEY, {
+    path: ['ANTHROPIC_API_KEY'],
+    error: 'ANTHROPIC_API_KEY is required when LLM_PROVIDER=anthropic',
+  })
+  .refine((env) => env.NODE_ENV !== 'test' || env.LLM_PROVIDER === 'fake', {
+    path: ['LLM_PROVIDER'],
+    error: 'Tests must use LLM_PROVIDER=fake',
+  })
+  .refine((env) => env.NODE_ENV !== 'production' || env.LLM_PROVIDER !== 'fake', {
+    path: ['LLM_PROVIDER'],
+    error: 'The fake LLM provider is not allowed in production',
   });
 
 export type Env = z.infer<typeof envSchema>;
