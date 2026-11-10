@@ -3,6 +3,7 @@
   "version": "0.0.0",
   "private": true,
   "dependencies": {
+    "@anthropic-ai/sdk": "1.6.0",
     "@knowgate/db": "workspace:*",
     "@knowgate/shared": "workspace:*",
     "@nestjs/common": "12.4.0",

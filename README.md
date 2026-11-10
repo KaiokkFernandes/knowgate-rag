@@ -5,7 +5,8 @@
 > Internal knowledge assistant that answers from company documents **with citations**, shows each
 > user **only what their team can see**, and **masks personal data** before anything reaches the LLM.
 
-**Status:** phase 2 complete — upload, masking, embeddings and hybrid search with access control.
+**Status:** phase 3 in progress — answers with citations and streaming are done; the daily usage
+limit is next.
 
 ## The problem
 
@@ -237,6 +238,57 @@ the user may read, each with document title, reference (page or section), conten
   small organization next to a much larger one, team visibility (member, outsider, admin) and
   `READY`-only search.
 
+### Answers with citations
+
+`POST /orgs/:orgId/chat` with `{ "question": "...", "conversationId"?: "..." }` (any member)
+streams the answer as **Server-Sent Events**:
+
+| Event      | Data                                                                                      |
+| ---------- | ----------------------------------------------------------------------------------------- |
+| `meta`     | `conversationId` and the `sources` sent to the model (chunk, document, reference, text)   |
+| `text`     | the next piece of the answer                                                              |
+| `citation` | `sourceIndex` and `citedText`, as soon as Claude cites a source                           |
+| `done`     | final `answer`, `citations` with character offsets, `notFound`, `stopReason`, `messageId` |
+| `error`    | a generic message (details stay in the server log, without the question)                  |
+
+`GET /orgs/:orgId/conversations` and `GET /orgs/:orgId/conversations/:id` list and reopen the
+user's own conversations.
+
+- **Native citations instead of prompt-only citations:** each chunk goes to Claude as a
+  `search_result` block with `citations: { enabled: true }`. The API returns structured citations
+  (`search_result_index` plus the exact `cited_text`) attached to the text they support, so the
+  model cannot make up a source or a quote, and the API maps each citation back to its chunk and
+  document. The alternative (asking for `[1]` markers in the prompt and parsing them) breaks
+  silently when the model formats them differently.
+- **No basis, no answer:** chunks below `CHAT_MIN_SIMILARITY` (cosine similarity of the vector
+  search) are dropped; if none remain, the API answers "Não encontrei essa informação nos
+  documentos disponíveis." **without calling the model**, so it cannot invent and it costs
+  nothing. Full-text-only matches have no similarity and are not sent: a shared word is not
+  evidence. The threshold (0.4) is provisional and is tuned with the eval in phase 5.
+- **Prompt injection:** document text only enters as search-result data, never as
+  instructions. The instructions live in the system prompt, which tells Claude to treat the
+  documents as data and ignore any instructions inside them.
+- **Prompt caching:** the fixed system prompt carries a `cache_control` breakpoint. It only pays
+  off once the cached prefix reaches the model's minimum (512 tokens on Haiku 5.5); the usage
+  fields `cache_read_input_tokens` / `cache_creation_input_tokens` are recorded either way.
+- **Streaming end to end:** Claude's stream is forwarded as it arrives (`X-Accel-Buffering: no`
+  disables proxy buffering). Validation, the conversation check and retrieval run first, so
+  their errors are normal HTTP statuses; once streaming starts, failures become an `error` event.
+  If the client disconnects, the request to Claude is aborted, so nobody pays for unread tokens.
+- **Model and effort by configuration:** `CLAUDE_MODEL` (Haiku 5.5 by default, Opus 5.5 for
+  comparison), `CLAUDE_EFFORT` (`low` by default: short grounded answers do not need long
+  reasoning) and `CLAUDE_MAX_TOKENS`. Unknown models are rejected at startup because their cost
+  could not be computed.
+- **Privacy:** the question is masked before it is embedded, sent to Claude or stored; the
+  history sent for follow-up questions (last 6 messages) is the stored, masked text.
+- **Cost:** each answer records input (including cached), output tokens and the cost in USD on
+  the message and as a `CHAT` `UsageEvent` (cache reads at 0.1x and 5-minute cache writes at
+  1.25x the input price).
+- **Tests without paid APIs:** `LlmProvider` has an Anthropic implementation (unit-tested with a
+  stub client that replays stream events) and an offline fake used by the integration tests:
+  SSE order, citation offsets, "not found" without a model call, team visibility, masking,
+  conversation ownership, history and mid-stream failures.
+
 ### Continuous integration
 
 GitHub Actions runs three parallel jobs on every pull request and on `main`:
@@ -277,8 +329,11 @@ found" and LLM cost control (phase 3).
 - The embedding queue lives in the API process: with several instances, two of them could
   process the same document after a restart (paying twice). Phase 6 moves it to SQS.
 - Recorded embedding cost is the list price; Voyage's free tokens are not deducted.
-- Search returns ranked chunks only; the relevance threshold for answering "not found" is set
-  in phase 3 and tuned with the eval (phase 5). Reranking is an optional next step.
+- The "not found" threshold uses vector similarity only and has not been tuned yet (phase 5
+  eval). Reranking is an optional next step.
+- A conversation keeps only the last 6 messages as context; older turns are not summarized.
+- If the client disconnects mid-answer, the question is stored without an answer and the partial
+  usage of the aborted request is not recorded.
 - The access rule exists twice (Prisma for listing, SQL for search); integration tests cover
   both, and Row Level Security (planned) would add a database-level backstop.
 - Masking covers structured identifiers only: names and addresses are not detected. Masked

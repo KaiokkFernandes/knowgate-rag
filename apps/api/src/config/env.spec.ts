@@ -8,13 +8,19 @@ const base = {
 
 describe('validateEnv', () => {
   it('accepts the fake provider in tests and Voyage with a key in production', () => {
-    expect(validateEnv({ ...base, NODE_ENV: 'test', EMBEDDING_PROVIDER: 'fake' })).toMatchObject({
+    expect(
+      validateEnv({ ...base, NODE_ENV: 'test', EMBEDDING_PROVIDER: 'fake', LLM_PROVIDER: 'fake' }),
+    ).toMatchObject({
       EMBEDDING_PROVIDER: 'fake',
       EMBEDDING_DIMENSION: 1024,
     });
-    expect(validateEnv({ ...base, NODE_ENV: 'production', VOYAGE_API_KEY: 'k' })).toMatchObject({
+    expect(
+      validateEnv({ ...base, NODE_ENV: 'production', VOYAGE_API_KEY: 'k', ANTHROPIC_API_KEY: 'k' }),
+    ).toMatchObject({
       EMBEDDING_PROVIDER: 'voyage',
       VOYAGE_MODEL: 'voyage-4-large',
+      LLM_PROVIDER: 'anthropic',
+      CLAUDE_MODEL: 'claude-haiku-5-5',
     });
   });
 
@@ -26,6 +32,21 @@ describe('validateEnv', () => {
       'EMBEDDING_PROVIDER',
     ],
     ['Voyage without a key', { NODE_ENV: 'development' }, 'VOYAGE_API_KEY'],
+    [
+      'tests calling Claude',
+      { NODE_ENV: 'test', EMBEDDING_PROVIDER: 'fake', ANTHROPIC_API_KEY: 'k' },
+      'LLM_PROVIDER',
+    ],
+    [
+      'the fake LLM in production',
+      { NODE_ENV: 'production', VOYAGE_API_KEY: 'k', LLM_PROVIDER: 'fake' },
+      'LLM_PROVIDER',
+    ],
+    [
+      'Claude without a key',
+      { NODE_ENV: 'development', EMBEDDING_PROVIDER: 'fake' },
+      'ANTHROPIC_API_KEY',
+    ],
     [
       'a dimension other than the vector(1024) column',
       { EMBEDDING_PROVIDER: 'fake', EMBEDDING_DIMENSION: '512' },
